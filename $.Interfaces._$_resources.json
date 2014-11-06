@@ -1,0 +1,142 @@
+@!(model, intf)
+@{
+
+	var ops= fromjs(intf.Operations).orderBy(function(op){
+			return op.getAttribute('restendpoint').Values[1];
+		})
+		.groupBy({
+			key:function(op){
+				return op.getAttribute('restendpoint').Values[1];
+			}
+		}).toArray();
+	var ver=intf.getAttribute('version')?intf.getAttribute('version').Values[0]:'0.0.0';
+	function endsWith(s, v) {
+        if (s === undefined || v === undefined) return false;
+        if (s === null || v === null) return false;
+        if (s.length < v.length) return false;
+        if (s.substr(s.length - v.length, v.length) === v) return true;
+        return false;
+    }
+    //from https://github.com/wordnik/swagger-spec/blob/master/versions/1.2.md#431-primitives
+    var tmap={
+    	"int":		["integer", "int64"],	//signed 64 bits
+    	"long":		["integer", "int64"],	//signed 64 bits
+    	"short":	["integer", "int32"],	//signed 32 bits
+		"float":	["number", "float"], 	
+		"double":	["number", "double"],	
+		"decimal":	["number", "double"],
+		"string":	["string"], 		
+		"byte":		["string" ,"byte"], 	
+		"boolean":	["boolean"], 
+		"datetime":	["string","date-time"]
+    }
+}
+
+@function datatype(typ) {
+	@if(typ.Name=='set' || typ.Name=='list') {
+	"type": "array",
+	"items":{
+		@if(tmap[typ.Types[0].Name]){
+		"type":"@(tmap[typ.Types[0].Name][0])",
+		} else {
+		"$ref":	"@(typ.Types[0].Name)",
+		}
+	},
+	@if(typ.Name=='set') {
+	"uniqueItems":true,	
+	}
+	} else {
+	"type":"@typ.Name",
+		@if(tmap[typ.Name] && tmap[typ.Name][1]){
+	"format":"@(tmap[typ.Name][1])",
+		}
+	}
+}
+{
+ 	"swaggerVersion": "1.2",
+	"apiVersion": "@ver",
+	"basePath": "https://api.tesco.com",
+	"resourcePath": "/v@(intf.Version().Major)/@(intf.Name.toLowerCase())",
+	"produces": ["application/json", "application/xml"] ,
+	"consumes": ["application/json", "application/xml"],
+	"apis": [
+	@for(var i=0; i<ops.length; i++) { 
+		@{ var data=ops[i].data; var fep=data[0].getAttribute('restendpoint').Values; }
+		{
+			"path": "@(fep[1])",
+			"operations":[
+			@for(var j=0;j<data.length;++j) {
+			@{ var op=data[j], ep=op.getAttribute('restendpoint').Values; prms=Object.getOwnPropertyNames(op.Parameters);}
+				{
+					"nickname":"@op.Name",
+					"method":"@ep[0]",
+					"notes":@(JSON.stringify(op.getDescription())),
+					@datatype(op.Return)
+					"parameters":[
+					@for(var p=0;p<prms.length;++p) {
+						@{ var prm=op.Parameters[prms[p]], pa=op.getAttribute('parameter', prm.Name);}
+						{
+							"name": "@prm.Name",
+							"required": @(JSON.stringify(prm.Mandatory||endsWith(prm.Name,'FromBody'))),
+							@datatype(prm.Type)
+							@if(ep[3]==prm.Name){
+							"paramType": "body",
+							} else {
+              				"paramType": "@(prm.Mandatory?'path':'query')",
+              				}
+              				"description": @((pa && pa.Values.length>1)?JSON.stringify(pa.Values[1]):'""')
+						},
+					}
+					],
+					"responseMessages":[
+					]
+				},
+			}
+			]
+		},
+	}
+	],
+	"models": {
+	@for(var i=0; i<intf.Types.length; i++) { 
+		@{var typ=intf.Types[i]; prms=Object.getOwnPropertyNames(typ.Parameters); }
+		"@(typ.Name)":{
+			"id":"@(typ.Name)",
+			"properties":{
+				@for(var p=0;p<prms.length;++p) {
+					@{ var prm=typ.Parameters[prms[p]], pa=typ.getAttribute('parameter', prm.Name);}
+					"@prm.Name":{
+						@datatype(prm.Type)
+					},
+				}
+			},
+			"required":[
+				@for(var p=0;p<prms.length;++p) {
+					@{ var prm=typ.Parameters[prms[p]], pa=typ.getAttribute('parameter', prm.Name);}
+				@if(prm.Mandatory){
+				"@(prm.Name)",
+				}
+				}
+			]
+		},
+	}
+	},
+	"authorizations":{
+	    "oauth2": {
+	      "type": "oauth2",
+	      "scopes": [
+			{
+			  "scope": "basic",
+			  "description": "Access to user's basic profile attributes."
+			}
+	       ]
+	    },
+	    "grantTypes":{
+	    "implicit": {
+			  "loginEndpoint": {
+		      	"url": "https://api.tesco.com/v2/identity/issue/oauth/token"
+			    },
+			    "tokenName": "access_token"
+			  },
+	     }
+	}
+}
